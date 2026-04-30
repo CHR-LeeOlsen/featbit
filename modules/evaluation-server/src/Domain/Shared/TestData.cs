@@ -41,4 +41,8 @@ public static class TestData
     }
 
     public const string RelayProxyTokenString = "rp-MDcwNTEzNDExNzQ3MQtXO7IPcN6U-z5fAktj18CQ";
+
+    // v2 HMAC-signed tokens (generated from the same secrets/timestamps as above)
+    public const string ClientV2TokenString = "v2.eyJzZWNyZXQiOiJncG5PVjN3STNrS0FPOXE5dmlDMHdRV2RLWnJWQWYyVTZnQW54bDRsU0gzdyIsInRpbWVzdGFtcCI6MTY2NjAxODI0NzYwM30.48Z9qI3c3r-2BTeHalR_L-9N8iI-fm2unP8srboyN1g";
+    public const string ServerV2TokenString = "v2.eyJzZWNyZXQiOiJ2M2ZhSnkzUkNVTzhkLUVKaVZkTjZ3YVJmR2pmTmFuMDJNczljMExpVEQ2dyIsInRpbWVzdGFtcCI6MTY2NjAxODgwMDc1NH0.TgWqvGl9bYoZbYmBPhv15uEVBKOJzM4C9c6peAUbPyk";
 }

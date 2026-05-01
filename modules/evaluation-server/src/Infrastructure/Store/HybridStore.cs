@@ -51,4 +51,31 @@ public class HybridStore : IStore
 
     public async Task<Secret?> GetSecretAsync(string secretString) =>
         await AvailableStore.GetSecretAsync(secretString);
+
+    public async Task<SecretWithValue[]> GetSecretsAsync(Guid envId)
+    {
+        var results = await AvailableStore.GetSecretsAsync(envId);
+        if (results.Length > 0)
+        {
+            return results;
+        }
+
+        // Fall through to other stores if the available store returned empty
+        // (e.g. RedisStore can't look up by envId)
+        foreach (var dbStore in _dbStores.Values)
+        {
+            if (dbStore.Name == AvailableStore.Name)
+            {
+                continue;
+            }
+
+            results = await dbStore.GetSecretsAsync(envId);
+            if (results.Length > 0)
+            {
+                return results;
+            }
+        }
+
+        return [];
+    }
 }

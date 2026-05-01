@@ -11,6 +11,7 @@ public sealed class RequestValidator(
     IStore store,
     StreamingOptions options,
     IRelayProxyService rpService,
+    ITokenValidator tokenValidator,
     ILogger<RequestValidator> logger)
     : IRequestValidator
 {
@@ -105,41 +106,20 @@ public sealed class RequestValidator(
 
         async Task<ValidationResult> ValidateV2TokenAsync()
         {
-            var hmacToken = new HmacToken(tokenString.AsSpan());
-            var current = systemClock.UtcNow.ToUnixTimeMilliseconds();
-
-            if (!hmacToken.IsValid)
+            var result = await tokenValidator.ValidateAsync(tokenString);
+            if (!result.IsValid)
             {
-                logger.LogInformation("Token validation failed. Version: v2, Reason: malformed, Token: {Token}", tokenString);
-                return ValidationResult.Failed($"Invalid v2 token: {tokenString}");
+                return ValidationResult.Failed(result.Reason);
             }
 
-            if (Math.Abs(current - hmacToken.Timestamp) > options.TokenExpirySeconds * 1000)
+            if (result.MatchedSecret!.Type != type)
             {
-                logger.LogInformation("Token validation failed. Version: v2, Reason: expired, Token: {Token}", tokenString);
-                return ValidationResult.Failed($"v2 token is expired: {tokenString}");
-            }
-
-            var secret = await store.GetSecretAsync(hmacToken.SecretString);
-            if (secret is null)
-            {
-                logger.LogInformation("Token validation failed. Version: v2, Reason: secret_not_found, Secret: {Secret}", hmacToken.SecretString);
-                return ValidationResult.Failed($"Secret is not found: {hmacToken.SecretString}");
-            }
-
-            if (!hmacToken.VerifySignature())
-            {
-                logger.LogInformation("Token validation failed. Version: v2, Reason: bad_signature, Secret: {Secret}", hmacToken.SecretString);
-                return ValidationResult.Failed($"Invalid v2 token signature: {tokenString}");
-            }
-
-            if (secret.Type != type)
-            {
-                logger.LogInformation("Token validation failed. Version: v2, Reason: type_mismatch, SecretType: {SecretType}, RequestType: {RequestType}", secret.Type, type);
-                return ValidationResult.Failed($"Inconsistent secret used: {secret.Type}. Request type: {type}");
+                logger.LogInformation("Token validation failed. Version: v2, Reason: type_mismatch, SecretType: {SecretType}, RequestType: {RequestType}", result.MatchedSecret.Type, type);
+                return ValidationResult.Failed($"Inconsistent secret used: {result.MatchedSecret.Type}. Request type: {type}");
             }
 
             logger.LogInformation("Token validated successfully. Version: v2");
+            var secret = new Secret(result.MatchedSecret.Type, result.MatchedSecret.ProjectKey, result.MatchedSecret.EnvId, result.MatchedSecret.EnvKey);
             return ValidationResult.Ok([secret]);
         }
     }

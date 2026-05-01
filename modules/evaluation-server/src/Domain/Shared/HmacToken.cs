@@ -9,7 +9,7 @@ public struct HmacToken
 {
     private const string Prefix = "v2.";
 
-    public string SecretString { get; set; }
+    public Guid EnvId { get; set; }
 
     public long Timestamp { get; set; }
 
@@ -21,7 +21,7 @@ public struct HmacToken
 
     public HmacToken(ReadOnlySpan<char> tokenSpan)
     {
-        SecretString = string.Empty;
+        EnvId = Guid.Empty;
         Timestamp = 0;
         IsValid = false;
         _payloadBytes = null;
@@ -62,12 +62,18 @@ public struct HmacToken
         try
         {
             var payload = JsonSerializer.Deserialize<HmacTokenPayload>(_payloadBytes);
-            if (payload.Secret is null || payload.Secret.Length != 44)
+            if (payload.Eid is null || payload.Eid.Length != 22)
             {
                 return;
             }
 
-            SecretString = payload.Secret;
+            var envId = GuidHelper.Decode(payload.Eid.AsSpan());
+            if (envId == Guid.Empty)
+            {
+                return;
+            }
+
+            EnvId = envId;
             Timestamp = payload.Timestamp;
         }
         catch
@@ -78,14 +84,14 @@ public struct HmacToken
         IsValid = true;
     }
 
-    public bool VerifySignature()
+    public bool VerifySignature(string secretString)
     {
         if (!IsValid || _payloadBytes is null || _signatureBytes is null)
         {
             return false;
         }
 
-        var keyBytes = Encoding.UTF8.GetBytes(SecretString);
+        var keyBytes = Encoding.UTF8.GetBytes(secretString);
         var expectedSignature = HMACSHA256.HashData(keyBytes, _payloadBytes);
 
         return CryptographicOperations.FixedTimeEquals(expectedSignature, _signatureBytes);
@@ -132,8 +138,8 @@ public struct HmacToken
 
     private struct HmacTokenPayload
     {
-        [JsonPropertyName("secret")]
-        public string? Secret { get; set; }
+        [JsonPropertyName("eid")]
+        public string? Eid { get; set; }
 
         [JsonPropertyName("timestamp")]
         public long Timestamp { get; set; }

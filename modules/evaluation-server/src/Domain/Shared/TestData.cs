@@ -40,9 +40,28 @@ public static class TestData
         };
     }
 
+    public static SecretWithValue[] GetSecrets(Guid envId)
+    {
+        var results = new List<SecretWithValue>();
+
+        if (envId == ClientEnvId)
+        {
+            results.Add(new SecretWithValue(
+                SecretTypes.Client, ClientSecret.ProjectKey, ClientEnvId, ClientSecret.EnvKey, ClientSecretString));
+        }
+
+        if (envId == ServerEnvId)
+        {
+            results.Add(new SecretWithValue(
+                SecretTypes.Server, ServerSecret.ProjectKey, ServerEnvId, ServerSecret.EnvKey, ServerSecretString));
+        }
+
+        return results.ToArray();
+    }
+
     public const string RelayProxyTokenString = "rp-MDcwNTEzNDExNzQ3MQtXO7IPcN6U-z5fAktj18CQ";
 
-    // v2 HMAC-signed tokens (generated from the same secrets/timestamps as above)
-    public const string ClientV2TokenString = "v2.eyJzZWNyZXQiOiJncG5PVjN3STNrS0FPOXE5dmlDMHdRV2RLWnJWQWYyVTZnQW54bDRsU0gzdyIsInRpbWVzdGFtcCI6MTY2NjAxODI0NzYwM30.48Z9qI3c3r-2BTeHalR_L-9N8iI-fm2unP8srboyN1g";
-    public const string ServerV2TokenString = "v2.eyJzZWNyZXQiOiJ2M2ZhSnkzUkNVTzhkLUVKaVZkTjZ3YVJmR2pmTmFuMDJNczljMExpVEQ2dyIsInRpbWVzdGFtcCI6MTY2NjAxODgwMDc1NH0.TgWqvGl9bYoZbYmBPhv15uEVBKOJzM4C9c6peAUbPyk";
+    // v2 HMAC-signed tokens (eid-based payload: {"eid":"<22-char>","timestamp":...})
+    public const string ClientV2TokenString = "v2.eyJlaWQiOiJXZEtaclZBZjJVNmdBbnhsNGxTSDN3IiwidGltZXN0YW1wIjoxNjY2MDE4MjQ3NjAzfQ.7GPBJVS8COsg-_87zahfCvhUQC839aoQPIiNkfyRmUs";
+    public const string ServerV2TokenString = "v2.eyJlaWQiOiJhUmZHamZOYW4wMk1zOWMwTGlURDZ3IiwidGltZXN0YW1wIjoxNjY2MDE4ODAwNzU0fQ.N3oMco4KyyeBkH_eKY2azBnFvLWQZa5iigY5-fwxZzA";
 }

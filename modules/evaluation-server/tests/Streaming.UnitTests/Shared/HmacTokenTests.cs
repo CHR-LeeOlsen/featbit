@@ -5,35 +5,37 @@ namespace Streaming.UnitTests.Shared;
 public class HmacTokenTests
 {
     [Theory]
-    [InlineData(TestData.ClientV2TokenString, TestData.ClientSecretString, 1666018247603L)]
-    [InlineData(TestData.ServerV2TokenString, TestData.ServerSecretString, 1666018800754L)]
-    public void ParseValidV2Token(string tokenString, string expectedSecret, long expectedTimestamp)
+    [InlineData(TestData.ClientV2TokenString, "ad99d259-1f50-4ed9-a002-7c65e25487df", 1666018247603L)]
+    [InlineData(TestData.ServerV2TokenString, "8dc61769-5af3-4d9f-8cb3-d7342e24c3eb", 1666018800754L)]
+    public void ParseValidV2Token(string tokenString, string expectedEnvId, long expectedTimestamp)
     {
         var token = new HmacToken(tokenString);
 
         Assert.True(token.IsValid);
-        Assert.Equal(expectedSecret, token.SecretString);
+        Assert.Equal(new Guid(expectedEnvId), token.EnvId);
         Assert.Equal(expectedTimestamp, token.Timestamp);
     }
 
     [Theory]
-    [InlineData(TestData.ClientV2TokenString)]
-    [InlineData(TestData.ServerV2TokenString)]
-    public void VerifySignature_ValidToken_ReturnsTrue(string tokenString)
+    [InlineData(TestData.ClientV2TokenString, TestData.ClientSecretString)]
+    [InlineData(TestData.ServerV2TokenString, TestData.ServerSecretString)]
+    public void VerifySignature_ValidToken_ReturnsTrue(string tokenString, string secretKey)
     {
         var token = new HmacToken(tokenString);
 
         Assert.True(token.IsValid);
-        Assert.True(token.VerifySignature());
+        Assert.True(token.VerifySignature(secretKey));
     }
 
     [Fact]
     public void VerifySignature_TamperedPayload_ReturnsFalse()
     {
-        // Take a valid token and tamper with the payload (change one character)
+        // Take a valid token and tamper with the payload (change a character in the middle
+        // where all base64 bits are significant)
         var parts = TestData.ClientV2TokenString.Split('.');
-        var tamperedPayload = parts[1][..^1] + "X"; // change last char
-        var tampered = $"v2.{tamperedPayload}.{parts[2]}";
+        var payloadChars = parts[1].ToCharArray();
+        payloadChars[payloadChars.Length / 2] = payloadChars[payloadChars.Length / 2] == 'A' ? 'B' : 'A';
+        var tampered = $"v2.{new string(payloadChars)}.{parts[2]}";
 
         var token = new HmacToken(tampered);
 
@@ -41,7 +43,7 @@ public class HmacTokenTests
         // If it does parse, signature should not verify
         if (token.IsValid)
         {
-            Assert.False(token.VerifySignature());
+            Assert.False(token.VerifySignature(TestData.ClientSecretString));
         }
     }
 
@@ -59,7 +61,17 @@ public class HmacTokenTests
 
         // The token structure is still parseable (payload unchanged), but signature won't verify
         Assert.True(token.IsValid);
-        Assert.False(token.VerifySignature());
+        Assert.False(token.VerifySignature(TestData.ClientSecretString));
+    }
+
+    [Fact]
+    public void VerifySignature_WrongKey_ReturnsFalse()
+    {
+        var token = new HmacToken(TestData.ClientV2TokenString);
+
+        Assert.True(token.IsValid);
+        // Use a different secret key — should fail
+        Assert.False(token.VerifySignature(TestData.ServerSecretString));
     }
 
     [Theory]
@@ -85,7 +97,7 @@ public class HmacTokenTests
         var token = new HmacToken("invalid");
 
         Assert.False(token.IsValid);
-        Assert.False(token.VerifySignature());
+        Assert.False(token.VerifySignature("anykey"));
     }
 
     [Fact]
@@ -98,12 +110,12 @@ public class HmacTokenTests
     }
 
     [Fact]
-    public void ParseToken_PayloadWithShortSecret_IsNotValid()
+    public void ParseToken_PayloadWithShortEid_IsNotValid()
     {
-        // JSON payload with a secret that's too short
-        // {"secret":"short","timestamp":1234}
-        // base64url: eyJzZWNyZXQiOiJzaG9ydCIsInRpbWVzdGFtcCI6MTIzNH0
-        var token = new HmacToken("v2.eyJzZWNyZXQiOiJzaG9ydCIsInRpbWVzdGFtcCI6MTIzNH0.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        // JSON payload with an eid that's too short
+        // {"eid":"short","timestamp":1234}
+        // base64url: eyJlaWQiOiJzaG9ydCIsInRpbWVzdGFtcCI6MTIzNH0
+        var token = new HmacToken("v2.eyJlaWQiOiJzaG9ydCIsInRpbWVzdGFtcCI6MTIzNH0.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
         Assert.False(token.IsValid);
     }

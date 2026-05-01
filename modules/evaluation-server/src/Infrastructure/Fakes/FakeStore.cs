@@ -36,5 +36,7 @@ public class FakeStore : IDbStore
 
     public Task<Secret?> GetSecretAsync(string secretString) => Task.FromResult(TestData.GetSecret(secretString));
 
+    public Task<SecretWithValue[]> GetSecretsAsync(Guid envId) => Task.FromResult(TestData.GetSecrets(envId));
+
     public static SecretWithValue[] GetRpSecrets(string key) => FakeData.GetRpSecrets(key);
 }

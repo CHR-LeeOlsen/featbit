@@ -156,4 +156,49 @@ public class MongoDbStore : IDbStore
             document["env"]["key"].AsString
         );
     }
+
+    public async Task<SecretWithValue[]> GetSecretsAsync(Guid envId)
+    {
+        var pipeline = new BsonDocument[]
+        {
+            new("$match", new BsonDocument("_id", new BsonBinaryData(envId, GuidRepresentation.Standard))),
+            new("$lookup", new BsonDocument
+            {
+                { "from", "Projects" },
+                { "localField", "projectId" },
+                { "foreignField", "_id" },
+                { "as", "project" }
+            }),
+            new("$unwind", "$project"),
+            new("$project", new BsonDocument
+            {
+                { "project", new BsonDocument { { "key", "$project.key" } } },
+                { "env", new BsonDocument { { "id", "$_id" }, { "key", "$key" }, { "secrets", "$secrets" } } }
+            })
+        };
+
+        var query = _mongodb
+            .GetCollection<BsonDocument>("Environments")
+            .Aggregate<BsonDocument>(pipeline);
+
+        var document = await query.FirstOrDefaultAsync();
+        if (document is null)
+        {
+            return [];
+        }
+
+        var projectKey = document["project"]["key"].AsString;
+        var envIdValue = document["env"]["id"].AsGuid;
+        var envKey = document["env"]["key"].AsString;
+
+        return document["env"]["secrets"].AsBsonArray
+            .Select(s => new SecretWithValue(
+                s["type"].AsString,
+                projectKey,
+                envIdValue,
+                envKey,
+                s["value"].AsString
+            ))
+            .ToArray();
+    }
 }

@@ -135,26 +135,50 @@ public static class RateLimiterRegister
 
     /// <summary>
     /// Extracts the <c>EnvId</c> from the request.
-    /// HTTP controllers: parsed from the <c>Authorization</c> header.
+    /// HTTP controllers: parsed from the <c>Authorization</c> header (v1 secret or v2 HMAC token).
     /// WebSocket streaming: decoded from the <c>token</c> query parameter.
     /// </summary>
     private static Guid ResolveEnvId(HttpContext httpContext)
     {
         // HTTP controllers use the Authorization header directly
-        string? secretString = httpContext.Request.Headers.Authorization;
-        if (Secret.TryParse(secretString, out var envId))
+        string? authorization = httpContext.Request.Headers.Authorization;
+        if (!string.IsNullOrEmpty(authorization))
         {
-            return envId;
+            if (TokenVersion.Detect(authorization) == TokenVersion.V2)
+            {
+                // For v2 tokens, parse the envId directly from the payload (no HMAC verification here —
+                // full validation happens in the TokenAuthFilter/TokenValidationService).
+                var hmacToken = new HmacToken(authorization.AsSpan());
+                if (hmacToken.IsValid)
+                {
+                    return hmacToken.EnvId;
+                }
+            }
+            else if (Secret.TryParse(authorization, out var envId))
+            {
+                return envId;
+            }
         }
 
         // WebSocket streaming encodes the secret inside the token query parameter
         var tokenString = httpContext.Request.Query["token"].ToString();
         if (!string.IsNullOrWhiteSpace(tokenString))
         {
-            var token = new Token(tokenString.AsSpan());
-            if (token.IsValid && Secret.TryParse(token.SecretString, out var streamEnvId))
+            if (TokenVersion.Detect(tokenString) == TokenVersion.V2)
             {
-                return streamEnvId;
+                var hmacToken = new HmacToken(tokenString.AsSpan());
+                if (hmacToken.IsValid)
+                {
+                    return hmacToken.EnvId;
+                }
+            }
+            else
+            {
+                var token = new Token(tokenString.AsSpan());
+                if (token.IsValid && Secret.TryParse(token.SecretString, out var streamEnvId))
+                {
+                    return streamEnvId;
+                }
             }
         }
 

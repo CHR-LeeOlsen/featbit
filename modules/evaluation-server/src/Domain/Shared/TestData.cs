@@ -40,5 +40,28 @@ public static class TestData
         };
     }
 
+    public static SecretWithValue[] GetSecrets(Guid envId)
+    {
+        var results = new List<SecretWithValue>();
+
+        if (envId == ClientEnvId)
+        {
+            results.Add(new SecretWithValue(
+                SecretTypes.Client, ClientSecret.ProjectKey, ClientEnvId, ClientSecret.EnvKey, ClientSecretString));
+        }
+
+        if (envId == ServerEnvId)
+        {
+            results.Add(new SecretWithValue(
+                SecretTypes.Server, ServerSecret.ProjectKey, ServerEnvId, ServerSecret.EnvKey, ServerSecretString));
+        }
+
+        return results.ToArray();
+    }
+
     public const string RelayProxyTokenString = "rp-MDcwNTEzNDExNzQ3MQtXO7IPcN6U-z5fAktj18CQ";
+
+    // v2 HMAC-signed tokens (eid-based payload: {"eid":"<22-char>","timestamp":...})
+    public const string ClientV2TokenString = "v2.eyJlaWQiOiJXZEtaclZBZjJVNmdBbnhsNGxTSDN3IiwidGltZXN0YW1wIjoxNjY2MDE4MjQ3NjAzfQ.7GPBJVS8COsg-_87zahfCvhUQC839aoQPIiNkfyRmUs";
+    public const string ServerV2TokenString = "v2.eyJlaWQiOiJhUmZHamZOYW4wMk1zOWMwTGlURDZ3IiwidGltZXN0YW1wIjoxNjY2MDE4ODAwNzU0fQ.N3oMco4KyyeBkH_eKY2azBnFvLWQZa5iigY5-fwxZzA";
 }

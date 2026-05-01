@@ -184,6 +184,7 @@ public class RequestValidatorTests
         IStore? store = null,
         StreamingOptions? streamingOptions = null,
         IRelayProxyService? rpService = null,
+        ITokenValidator? tokenValidator = null,
         ILogger<RequestValidator>? logger = null)
     {
         var mockedStore = Mock.Of<IStore>(x =>
@@ -195,6 +196,7 @@ public class RequestValidatorTests
             store ?? mockedStore,
             streamingOptions ?? new StreamingOptions(),
             rpService ?? null!,
+            tokenValidator ?? Mock.Of<ITokenValidator>(),
             logger ?? NullLogger<RequestValidator>.Instance
         );
 

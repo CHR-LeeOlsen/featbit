@@ -93,4 +93,11 @@ public class RedisStore(IRedisClient redisClient) : IDbStore
             entries[3].ToString()
         );
     }
+
+    public Task<SecretWithValue[]> GetSecretsAsync(Guid envId)
+    {
+        // Redis store is keyed by secret string; cannot look up by envId.
+        // HybridStore will fall through to the DB store for this method.
+        return Task.FromResult(Array.Empty<SecretWithValue>());
+    }
 }

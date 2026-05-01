@@ -148,4 +148,42 @@ public class PostgresStore(NpgsqlDataSource dataSource) : IDbStore
         // no matching secret found
         return null;
     }
+
+    public async Task<SecretWithValue[]> GetSecretsAsync(Guid envId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+
+        IDictionary<string, object>? row = await connection.QueryFirstOrDefaultAsync(
+            """
+            select env.id as env_id, env.key as env_key, env.secrets as env_secrets, pro.key as project_key
+            from environments env
+                     join projects pro on env.project_id = pro.id
+            where env.id = @envId
+            """, new { envId }
+        );
+
+        if (row is null)
+        {
+            return [];
+        }
+
+        var projectKey = (row["project_key"] as string)!;
+        var envKey = (row["env_key"] as string)!;
+        var envIdValue = (Guid)row["env_id"];
+
+        using var json = JsonDocument.Parse((row["env_secrets"] as string)!);
+        var results = new List<SecretWithValue>();
+        foreach (var element in json.RootElement.EnumerateArray())
+        {
+            results.Add(new SecretWithValue(
+                element.GetProperty("type").GetString()!,
+                projectKey,
+                envIdValue,
+                envKey,
+                element.GetProperty("value").GetString()!
+            ));
+        }
+
+        return results.ToArray();
+    }
 }

@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using Domain.Shared;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Internal;
 
 namespace Application.IntegrationTests.Http;
 
@@ -177,5 +181,88 @@ public class HttpAuthenticationTests
         var response = await client.PostAsJsonAsync("/api/public/agent/register", "agent-id");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    // ---- v2 (HMAC) token cases ----
+
+    private HttpClient CreateClientWithClock(long timestamp, IStore? store = null)
+    {
+        var app = _app.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(collection =>
+            {
+                collection.Replace(ServiceDescriptor.Singleton<ISystemClock>(new TestClock(timestamp)));
+                if (store is not null)
+                {
+                    collection.Replace(ServiceDescriptor.Singleton(store));
+                }
+            });
+        });
+
+        return app.CreateClient();
+    }
+
+    [Fact]
+    public async Task GetServerSideSdkPayload_WithValidV2Token_Returns200()
+    {
+        var client = CreateClientWithClock(TestData.ServerToken.Timestamp);
+        client.DefaultRequestHeaders.Add("Authorization", TestData.ServerV2TokenString);
+
+        var response = await client.GetAsync("/api/public/sdk/server/latest-all");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetServerSideSdkPayload_WithValidClientV2Token_Returns200()
+    {
+        var client = CreateClientWithClock(TestData.ClientToken.Timestamp);
+        client.DefaultRequestHeaders.Add("Authorization", TestData.ClientV2TokenString);
+
+        var response = await client.GetAsync("/api/public/sdk/server/latest-all");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetServerSideSdkPayload_WithExpiredV2Token_Returns401()
+    {
+        // Move the clock well past the token's expiry window.
+        var expiredClock = TestData.ServerToken.Timestamp + 31 * 1000;
+        var client = CreateClientWithClock(expiredClock);
+        client.DefaultRequestHeaders.Add("Authorization", TestData.ServerV2TokenString);
+
+        var response = await client.GetAsync("/api/public/sdk/server/latest-all");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetServerSideSdkPayload_WithMalformedV2Token_Returns401()
+    {
+        var client = CreateClientWithClock(TestData.ServerToken.Timestamp);
+        client.DefaultRequestHeaders.Add("Authorization", "v2.garbage.signature");
+
+        var response = await client.GetAsync("/api/public/sdk/server/latest-all");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetServerSideSdkPayload_V2TokenStoreUnavailable_Returns503()
+    {
+        // A store that throws on the v2 secrets lookup simulates a transient outage.
+        // The auth handler must surface this as 503 (retryable), not 401.
+        var faultyStore = new Mock<IStore>();
+        faultyStore
+            .Setup(store => store.GetSecretsAsync(It.IsAny<Guid>()))
+            .ThrowsAsync(new Exception("store outage"));
+
+        var client = CreateClientWithClock(TestData.ServerToken.Timestamp, faultyStore.Object);
+        client.DefaultRequestHeaders.Add("Authorization", TestData.ServerV2TokenString);
+
+        var response = await client.GetAsync("/api/public/sdk/server/latest-all");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 }

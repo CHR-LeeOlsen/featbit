@@ -137,4 +137,95 @@ public class AuthenticationTests
         Assert.NotEqual((WebSocketCloseStatus)4003, close.CloseStatus);
         Assert.Equal(WebSocketCloseStatus.InternalServerError, close.CloseStatus);
     }
+
+    // ---- v2 (HMAC) token cases ----
+
+    [Fact]
+    public async Task ConnectAsync_WithValidClientV2Token_Succeeds()
+    {
+        var ws = await _app.ConnectAsync(
+            TestData.ClientToken.Timestamp,
+            $"?type=client&version=2&token={TestData.ClientV2TokenString}");
+
+        Assert.Equal(WebSocketState.Open, ws.State);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WithValidServerV2Token_Succeeds()
+    {
+        var ws = await _app.ConnectAsync(
+            TestData.ServerToken.Timestamp,
+            $"?type=server&version=2&token={TestData.ServerV2TokenString}");
+
+        Assert.Equal(WebSocketState.Open, ws.State);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WithExpiredV2Token_ClosesWith4003()
+    {
+        var expiredClock = TestData.ClientToken.Timestamp - 31 * 1000;
+
+        var ws = await _app.ConnectAsync(
+            expiredClock,
+            $"?type=client&version=2&token={TestData.ClientV2TokenString}");
+        var close = await ws.ReceiveAsync(new byte[100], CancellationToken.None);
+
+        Assert.Equal(WebSocketMessageType.Close, close.MessageType);
+        Assert.Equal((WebSocketCloseStatus)4003, close.CloseStatus);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WithInconsistentV2SecretType_ClosesWith4003()
+    {
+        var ws = await _app.ConnectAsync(
+            TestData.ClientToken.Timestamp,
+            $"?type=server&version=2&token={TestData.ClientV2TokenString}");
+        var close = await ws.ReceiveAsync(new byte[100], CancellationToken.None);
+
+        Assert.Equal(WebSocketMessageType.Close, close.MessageType);
+        Assert.Equal((WebSocketCloseStatus)4003, close.CloseStatus);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WithMalformedV2Token_ClosesWith4003()
+    {
+        var ws = await _app.ConnectAsync(
+            TestData.ClientToken.Timestamp,
+            "?type=client&version=2&token=v2.garbage.signature");
+        var close = await ws.ReceiveAsync(new byte[100], CancellationToken.None);
+
+        Assert.Equal(WebSocketMessageType.Close, close.MessageType);
+        Assert.Equal((WebSocketCloseStatus)4003, close.CloseStatus);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_V2StoreUnavailable_ClosesWithInternalServerError()
+    {
+        // A store that throws on the v2 secrets lookup simulates a transient outage,
+        // which the validator maps to Unavailable. The connection must be accepted and
+        // closed with a non-4003 status so SDKs treat it as transient and reconnect.
+        var faultyStore = new Mock<IStore>();
+        faultyStore
+            .Setup(store => store.GetSecretsAsync(It.IsAny<Guid>()))
+            .ThrowsAsync(new Exception("store outage"));
+
+        var app = _app.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(collection =>
+            {
+                collection.Replace(ServiceDescriptor.Singleton<ISystemClock>(new TestClock(TestData.ClientToken.Timestamp)));
+                collection.Replace(ServiceDescriptor.Singleton<IStore>(faultyStore.Object));
+            });
+        });
+
+        var client = app.Server.CreateWebSocketClient();
+        var streamingUri = new Uri($"http://localhost/streaming?type=client&version=2&token={TestData.ClientV2TokenString}");
+
+        var ws = await client.ConnectAsync(streamingUri, CancellationToken.None);
+        var close = await ws.ReceiveAsync(new byte[100], CancellationToken.None);
+
+        Assert.Equal(WebSocketMessageType.Close, close.MessageType);
+        Assert.NotEqual((WebSocketCloseStatus)4003, close.CloseStatus);
+        Assert.Equal(WebSocketCloseStatus.InternalServerError, close.CloseStatus);
+    }
 }

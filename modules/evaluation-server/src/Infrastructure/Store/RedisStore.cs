@@ -133,6 +133,54 @@ public class RedisStore(IRedisClient redisClient, ILogger<RedisStore> logger) : 
         );
     }
 
+    public async Task<SecretWithValue[]> GetSecretsAsync(Guid envId)
+    {
+        // the env->secrets index is a Redis set of the env's secret strings, maintained by the back-end
+        var index = RedisKeys.EnvSecrets(envId);
+        var members = await Redis.SetMembersAsync(index);
+        if (members.Length == 0)
+        {
+            return [];
+        }
+
+        // read each secret hash to recover type/projectKey/envKey; the value is the set member itself
+        var tasks = new Task<RedisValue[]>[members.Length];
+        for (var i = 0; i < members.Length; i++)
+        {
+            tasks[i] = Redis.HashGetAsync(
+                RedisKeys.Secret(members[i]!),
+                new RedisValue[] { "type", "projectKey", "envKey" });
+        }
+
+        var hashes = await Task.WhenAll(tasks);
+
+        var secrets = new List<SecretWithValue>(members.Length);
+        var orphans = new List<string>();
+        for (var i = 0; i < members.Length; i++)
+        {
+            var entries = hashes[i];
+
+            // orphan: an index member whose backing secret hash is missing
+            if (entries[0].IsNull)
+            {
+                orphans.Add(members[i].ToString());
+                continue;
+            }
+
+            secrets.Add(new SecretWithValue(
+                entries[0].ToString(),
+                entries[1].ToString(),
+                envId,
+                entries[2].ToString(),
+                members[i].ToString()
+            ));
+        }
+
+        LogOrphans(orphans, members.Length, envId, "secret");
+
+        return secrets.ToArray();
+    }
+
     // Filters out RedisValues whose backing key was missing (HasValue == false) and logs the
     // orphan keys so operators can spot accumulating drift between an env's index and its values.
     // Without this filter, a single orphan index member produces a null byte[] that crashes

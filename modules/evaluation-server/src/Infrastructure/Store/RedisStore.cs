@@ -155,7 +155,7 @@ public class RedisStore(IRedisClient redisClient, ILogger<RedisStore> logger) : 
         var hashes = await Task.WhenAll(tasks);
 
         var secrets = new List<SecretWithValue>(members.Length);
-        var orphans = new List<string>();
+        var orphanCount = 0;
         for (var i = 0; i < members.Length; i++)
         {
             var entries = hashes[i];
@@ -163,7 +163,7 @@ public class RedisStore(IRedisClient redisClient, ILogger<RedisStore> logger) : 
             // orphan: an index member whose backing secret hash is missing
             if (entries[0].IsNull)
             {
-                orphans.Add(members[i].ToString());
+                orphanCount++;
                 continue;
             }
 
@@ -176,7 +176,16 @@ public class RedisStore(IRedisClient redisClient, ILogger<RedisStore> logger) : 
             ));
         }
 
-        LogOrphans(orphans, members.Length, envId, "secret");
+        // Never log the orphan members verbatim: for secrets the set member IS the raw secret
+        // value (SDK/server key), unlike flags/segments where orphans are Redis key names. Log a
+        // count only so drift is still observable without leaking live keys into logs.
+        if (orphanCount > 0)
+        {
+            logger.LogWarning(
+                "Orphan secret index members in env {EnvId}: {OrphanCount} of {TotalCount}.",
+                envId, orphanCount, members.Length
+            );
+        }
 
         return secrets.ToArray();
     }

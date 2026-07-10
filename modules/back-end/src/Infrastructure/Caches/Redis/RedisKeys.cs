@@ -27,4 +27,23 @@ public static class RedisKeys
     // Set of an environment's secret strings. Lets a v2 token (which carries only the
     // envId) enumerate the env's secrets without an env->secrets DB lookup.
     public static RedisKey EnvSecrets(Guid envId) => new($"{EnvSecretsPrefix}{envId}");
+
+    // Glob pattern matching every env->secrets index key. Used to enumerate all indexes
+    // (including those of deleted environments) during reconciliation.
+    public static string EnvSecretsPattern => $"{EnvSecretsPrefix}*";
+
+    // Extracts the environment id embedded in an env->secrets index key. Returns false for
+    // any key that does not match the expected prefix + guid shape.
+    public static bool TryParseEnvSecretsKey(RedisKey key, out Guid envId)
+    {
+        envId = Guid.Empty;
+
+        var value = key.ToString();
+        if (value is null || !value.StartsWith(EnvSecretsPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return Guid.TryParse(value.AsSpan(EnvSecretsPrefix.Length), out envId);
+    }
 }

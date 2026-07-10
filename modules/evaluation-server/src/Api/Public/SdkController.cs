@@ -1,5 +1,7 @@
+using Api.Authentication;
 using Api.RateLimiting;
 using Domain.EndUsers;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Streaming.Services;
@@ -16,6 +18,7 @@ public class SdkController : PublicApiControllerBase
         _dataSyncService = dataSyncService;
     }
 
+    [Authorize(Policy = FeatBitAuthorizationPolicies.ServerSecret)]
     [HttpGet("server/latest-all")]
     public async Task<IActionResult> GetServerSideSdkPayloadAsync([FromQuery] long timestamp = 0)
     {
@@ -34,6 +37,7 @@ public class SdkController : PublicApiControllerBase
         return new JsonResult(bootstrap);
     }
 
+    [Authorize(Policy = FeatBitAuthorizationPolicies.ClientSecret)]
     [HttpPost("client/latest-all")]
     public async Task<IActionResult> GetClientSdkPayloadAsync(EndUser endUser, [FromQuery] long timestamp = 0)
     {

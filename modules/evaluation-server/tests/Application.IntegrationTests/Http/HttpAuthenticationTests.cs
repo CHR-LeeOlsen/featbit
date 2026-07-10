@@ -214,14 +214,59 @@ public class HttpAuthenticationTests
     }
 
     [Fact]
-    public async Task GetServerSideSdkPayload_WithValidClientV2Token_Returns200()
+    public async Task GetServerSideSdkPayload_WithValidClientV2Token_Returns403()
     {
+        // A client secret must not authenticate against the server endpoint. The token is a valid,
+        // non-expired HMAC token, so authentication succeeds, but the server-secret policy rejects
+        // the client secret type with 403 (matching the streaming path's secret-type check).
         var client = CreateClientWithClock(TestData.ClientToken.Timestamp);
         client.DefaultRequestHeaders.Add("Authorization", TestData.ClientV2TokenString);
 
         var response = await client.GetAsync("/api/public/sdk/server/latest-all");
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetClientSideSdkPayload_WithValidServerV2Token_Returns403()
+    {
+        // A server secret must not authenticate against the client endpoint.
+        var client = CreateClientWithClock(TestData.ServerToken.Timestamp);
+        client.DefaultRequestHeaders.Add("Authorization", TestData.ServerV2TokenString);
+
+        var request = new
+        {
+            user = new
+            {
+                key = "test-user",
+                name = "Test User"
+            }
+        };
+
+        var response = await client.PostAsJsonAsync("/api/public/sdk/client/latest-all?timestamp=0", request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetClientSideSdkPayload_WithValidClientV2Token_IsNotUnauthorizedOrForbidden()
+    {
+        var client = CreateClientWithClock(TestData.ClientToken.Timestamp);
+        client.DefaultRequestHeaders.Add("Authorization", TestData.ClientV2TokenString);
+
+        var request = new
+        {
+            user = new
+            {
+                key = "test-user",
+                name = "Test User"
+            }
+        };
+
+        var response = await client.PostAsJsonAsync("/api/public/sdk/client/latest-all?timestamp=0", request);
+
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using Api.Authentication;
 using Api.Cors;
 using Api.RateLimiting;
 using Api.Services;
+using Domain.Shared;
 using Domain.Shared.Authentication;
 using Domain.Workspaces;
 using Infrastructure;
@@ -44,7 +45,21 @@ public static class ServicesRegister
             .RequireAuthenticatedUser()
             .Build();
         services.AddAuthorizationBuilder()
-            .SetFallbackPolicy(requireAuthPolicy);
+            .SetFallbackPolicy(requireAuthPolicy)
+            // Enforce the secret type per endpoint (mirrors the streaming RequestValidator check):
+            // a server secret cannot call a client endpoint and vice versa.
+            .AddPolicy(FeatBitAuthorizationPolicies.ServerSecret, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(ctx =>
+                    FeatBitAuthorizationPolicies.MatchesSecretType(ctx.User, SecretTypes.Server));
+            })
+            .AddPolicy(FeatBitAuthorizationPolicies.ClientSecret, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(ctx =>
+                    FeatBitAuthorizationPolicies.MatchesSecretType(ctx.User, SecretTypes.Client));
+            });
 
         // token validator (v1 structural validation only; store lookup added in PR 2)
         services.AddSingleton<ITokenValidator, TokenValidator>();

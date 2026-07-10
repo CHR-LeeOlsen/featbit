@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Application.Caches;
+using Domain.Environments;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -119,10 +120,77 @@ public class RedisPopulatingService(
     private async Task PopulateSecretsAsync()
     {
         var caches = await envService.GetSecretCachesAsync();
-        var tasks = caches.Select(x => cacheService.UpsertSecretAsync(x.Descriptor, x.Secret));
 
+        // upsert current DB secrets (the source of truth). Rebuilds each secret hash and
+        // (re)adds it to its env->secrets index.
+        var tasks = caches.Select(x => cacheService.UpsertSecretAsync(x.Descriptor, x.Secret));
         await Task.WhenAll(tasks);
 
-        logger.LogInformation("Populate secrets success, total count: {Total}", caches.Count);
+        // populate is otherwise additive-only: it never removes entries. Reconcile against
+        // the DB so secrets that were deleted or rotated while a delete event was missed
+        // (e.g. the back-end was down) do not linger in Redis and keep validating tokens.
+        var removed = await ReconcileSecretsAsync(caches);
+
+        logger.LogInformation(
+            "Populate secrets success, total count: {Total}, stale entries removed: {Removed}",
+            caches.Count,
+            removed
+        );
+    }
+
+    // Removes env->secrets index members (and their backing secret hashes) that are no
+    // longer present in the DB. Scans every env->secrets index key so indexes belonging to
+    // fully deleted environments are cleaned up too, not just rotated secrets in live envs.
+    private async Task<int> ReconcileSecretsAsync(ICollection<SecretCache> caches)
+    {
+        var desiredByEnv = caches
+            .GroupBy(x => x.Descriptor.Environment.Id)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => x.Secret.Value).ToHashSet(StringComparer.Ordinal)
+            );
+
+        var redis = redisClient.GetDatabase();
+        var removed = 0;
+
+        foreach (var endpoint in redisClient.Connection.GetEndPoints())
+        {
+            var server = redisClient.Connection.GetServer(endpoint);
+
+            // only enumerate keys from reachable primaries to avoid duplicate work and
+            // failures against replicas or disconnected nodes.
+            if (!server.IsConnected || server.IsReplica)
+            {
+                continue;
+            }
+
+            await foreach (var indexKey in server.KeysAsync(pattern: RedisKeys.EnvSecretsPattern))
+            {
+                if (!RedisKeys.TryParseEnvSecretsKey(indexKey, out var envId))
+                {
+                    continue;
+                }
+
+                desiredByEnv.TryGetValue(envId, out var desired);
+
+                var members = await redis.SetMembersAsync(indexKey);
+                foreach (var member in members)
+                {
+                    var value = member.ToString();
+                    if (desired != null && desired.Contains(value))
+                    {
+                        continue;
+                    }
+
+                    // stale: remove from the index and drop the backing secret hash. Redis
+                    // deletes the set automatically once its last member is removed.
+                    await redis.SetRemoveAsync(indexKey, member);
+                    await redis.KeyDeleteAsync(RedisKeys.Secret(value));
+                    removed++;
+                }
+            }
+        }
+
+        return removed;
     }
 }

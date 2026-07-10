@@ -9,8 +9,8 @@ namespace Streaming.Connections;
 
 /// <summary>
 /// Validates streaming requests pre-accept (before accepting the WebSocket).
-/// v1: performs structural validation (type, version, token parse) and store lookup with fallback handling.
-/// v2/HMAC validation added in a future PR.
+/// v1: structural validation (type, version, token parse) and store lookup with fallback handling.
+/// v2: HMAC signature verification (via ITokenValidator) plus expiry and secret-type checks.
 /// </summary>
 public sealed class RequestValidator(
     ISystemClock systemClock,
@@ -84,7 +84,51 @@ public sealed class RequestValidator(
             }
         }
 
-        async Task<ValidationResult> ValidateSecretTokenAsync()
+        Task<ValidationResult> ValidateSecretTokenAsync()
+        {
+            // v2 tokens are the raw "v2.…" string (not the v1 obfuscated envelope), so branch
+            // on version before attempting to parse the v1 Token envelope.
+            return TokenVersions.Detect(tokenString) == TokenVersion.V2
+                ? ValidateV2TokenAsync()
+                : ValidateV1TokenAsync();
+        }
+
+        async Task<ValidationResult> ValidateV2TokenAsync()
+        {
+            TokenValidationResult result;
+            try
+            {
+                // v2: HMAC signature verification against the env's stored secrets (store lookup)
+                result = await tokenValidator.ValidateAsync(tokenString);
+            }
+            catch (Exception ex)
+            {
+                logger.ErrorLookupSecretToken(tokenString, ex);
+
+                // Store unavailable → return Unavailable for transient retry
+                return ValidationResult.Unavailable($"Secret lookup unavailable: {ex.Message}");
+            }
+
+            if (result.Status == TokenValidationStatus.Invalid || result.Secret is null)
+            {
+                return ValidationResult.Invalid($"Invalid token: {tokenString}");
+            }
+
+            var current = systemClock.UtcNow.ToUnixTimeMilliseconds();
+            if (Math.Abs(current - result.Timestamp) > options.TokenExpirySeconds * 1000)
+            {
+                return ValidationResult.Invalid($"Token is expired: {tokenString}");
+            }
+
+            if (result.Secret.Type != type)
+            {
+                return ValidationResult.Invalid($"Inconsistent secret used: {result.Secret.Type}. Request type: {type}");
+            }
+
+            return ValidationResult.Valid([result.Secret]);
+        }
+
+        async Task<ValidationResult> ValidateV1TokenAsync()
         {
             Token token;
             TokenValidationResult structuralValidation;

@@ -26,4 +26,19 @@ public static class FakeSeedData
             _ => null
         };
     }
+
+    public static SecretWithValue[] GetSecrets(Guid envId)
+    {
+        if (envId == ClientEnvId)
+        {
+            return [new SecretWithValue(SecretTypes.Client, "webapp", ClientEnvId, "dev", ClientSecretString)];
+        }
+
+        if (envId == ServerEnvId)
+        {
+            return [new SecretWithValue(SecretTypes.Server, "webapp", ServerEnvId, "prod", ServerSecretString)];
+        }
+
+        return [];
+    }
 }

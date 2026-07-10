@@ -15,6 +15,11 @@ public interface IStore
     Task<IEnumerable<byte[]>> GetSegmentsAsync(Guid envId, long timestamp);
 
     Task<Secret?> GetSecretAsync(string secretString);
+
+    // Returns all secrets (with their values) for an environment. Used by v2 HMAC token
+    // validation, which carries only the envId and must enumerate the env's secrets to
+    // find the one whose value produces a matching signature.
+    Task<SecretWithValue[]> GetSecretsAsync(Guid envId);
 }
 
 public interface IDbStore : IStore;

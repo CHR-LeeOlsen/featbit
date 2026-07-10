@@ -9,6 +9,7 @@ public static class RedisKeys
     private const string SegmentPrefix = "featbit:segment:";
     private const string SegmentIndexPrefix = "featbit:segment-index:";
     private const string SecretPrefix = "featbit:secret:";
+    private const string EnvSecretsPrefix = "featbit:env-secrets:";
     private const string RateLimitPrefix = "featbit:rl:";
 
     public static RedisKey FlagIndex(Guid envId) => new($"{FlagIndexPrefix}{envId}");
@@ -20,6 +21,11 @@ public static class RedisKeys
     public static RedisKey Segment(string id) => new($"{SegmentPrefix}{id}");
 
     public static RedisKey Secret(string secretString) => new($"{SecretPrefix}{secretString}");
+
+    // Set of an environment's secret strings, maintained by the back-end. Lets a v2 token
+    // (which carries only the envId) enumerate the env's secrets. Prefix must stay identical
+    // to the back-end RedisKeys.EnvSecrets copy.
+    public static RedisKey EnvSecrets(Guid envId) => new($"{EnvSecretsPrefix}{envId}");
 
     public static RedisKey RateLimit(string type, string partitionKey) => new($"{RateLimitPrefix}{type}:{partitionKey}");
 }

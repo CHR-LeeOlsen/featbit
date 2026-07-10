@@ -2,6 +2,7 @@ using Application.Caches;
 using Domain.Environments;
 using Domain.FeatureFlags;
 using Domain.Segments;
+using Domain.Utils;
 using Domain.Workspaces;
 using StackExchange.Redis;
 
@@ -89,11 +90,22 @@ public class RedisCacheService(IRedisClient redis) : ICacheService
         };
 
         await Redis.HashSetAsync(key, fields);
+
+        // maintain the env->secrets index so a v2 token (carrying only the envId) can
+        // enumerate this env's secrets. Idempotent: SADD is a no-op if already present.
+        await Redis.SetAddAsync(RedisKeys.EnvSecrets(environment.Id), secret.Value);
     }
 
     public async Task DeleteSecretAsync(Secret secret)
     {
         var key = RedisKeys.Secret(secret.Value);
+
+        // remove from the env->secrets index first, then the secret hash. Redis drops the
+        // set automatically once it is empty.
+        if (TryGetEnvId(secret.Value, out var envId))
+        {
+            await Redis.SetRemoveAsync(RedisKeys.EnvSecrets(envId), secret.Value);
+        }
 
         await Redis.KeyDeleteAsync(key);
     }
@@ -110,5 +122,28 @@ public class RedisCacheService(IRedisClient redis) : ICacheService
         var license = await licenseGetter();
         await Redis.StringSetAsync(key, license);
         return license;
+    }
+
+    // A secret value is "{22-char header}{22-char base64url(envId)}". The env index is
+    // keyed by envId, so derive it from the value when only the Secret is available
+    // (e.g. on delete). Returns false for any value that is not in the expected shape.
+    private static bool TryGetEnvId(string secretValue, out Guid envId)
+    {
+        envId = Guid.Empty;
+
+        if (string.IsNullOrEmpty(secretValue) || secretValue.Length != 44)
+        {
+            return false;
+        }
+
+        try
+        {
+            envId = GuidHelper.Decode(secretValue[22..]);
+            return envId != Guid.Empty;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

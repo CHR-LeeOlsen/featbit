@@ -180,6 +180,108 @@ public class RequestValidatorTests
         Assert.Empty(validationResult.Secrets);
     }
 
+    // ---- v2 (HMAC) token cases ----
+
+    private static Mock<IStore> SetupV2Store() =>
+        SetupV2Store((Guid envId) => Task.FromResult(FakeSeedData.GetSecrets(envId)));
+
+    private static Mock<IStore> SetupV2Store(Func<Guid, Task<SecretWithValue[]>> getSecrets)
+    {
+        var store = new Mock<IStore>();
+        store.Setup(x => x.GetSecretsAsync(It.IsAny<Guid>())).Returns(getSecrets);
+        return store;
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ValidClientV2Request_ReturnsSecretForEnvironment()
+    {
+        var context = SetupTestContext(token: TestData.ClientV2TokenString);
+        var validator = SetupValidator(
+            current: TestData.ClientToken.Timestamp,
+            store: SetupV2Store().Object);
+
+        var validationResult = await validator.ValidateAsync(context);
+
+        Assert.Equal(ValidationResultStatus.Valid, validationResult.Status);
+        Assert.Single(validationResult.Secrets);
+        Assert.Equal(SecretTypes.Client, validationResult.Secrets[0].Type);
+        Assert.Equal(TestData.ClientEnvId, validationResult.Secrets[0].EnvId);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ValidServerV2Request_ReturnsSecretForEnvironment()
+    {
+        var context = SetupTestContext(type: ConnectionType.Server, token: TestData.ServerV2TokenString);
+        var validator = SetupValidator(
+            current: TestData.ServerToken.Timestamp,
+            store: SetupV2Store().Object);
+
+        var validationResult = await validator.ValidateAsync(context);
+
+        Assert.Equal(ValidationResultStatus.Valid, validationResult.Status);
+        Assert.Single(validationResult.Secrets);
+        Assert.Equal(SecretTypes.Server, validationResult.Secrets[0].Type);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_V2TokenExpired_FailsWithExpired()
+    {
+        var context = SetupTestContext(token: TestData.ClientV2TokenString);
+        var validator = SetupValidator(
+            current: TestData.ClientToken.Timestamp + 31 * 1000,
+            store: SetupV2Store().Object);
+
+        var validationResult = await validator.ValidateAsync(context);
+
+        Assert.Equal(ValidationResultStatus.Invalid, validationResult.Status);
+        Assert.Equal($"Token is expired: {TestData.ClientV2TokenString}", validationResult.Reason);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_V2ClientSecretUsedAsServerConnection_FailsWithInconsistentSecret()
+    {
+        var context = SetupTestContext(type: ConnectionType.Server, token: TestData.ClientV2TokenString);
+        var validator = SetupValidator(
+            current: TestData.ClientToken.Timestamp,
+            store: SetupV2Store().Object);
+
+        var validationResult = await validator.ValidateAsync(context);
+
+        Assert.Equal(ValidationResultStatus.Invalid, validationResult.Status);
+        Assert.Equal(
+            $"Inconsistent secret used: {SecretTypes.Client}. Request type: {ConnectionType.Server}",
+            validationResult.Reason);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_V2SignatureMismatch_FailsWithInvalidToken()
+    {
+        var store = SetupV2Store(envId => Task.FromResult<SecretWithValue[]>(
+        [
+            new SecretWithValue(SecretTypes.Client, "webapp", envId, "dev", "a-different-secret-value")
+        ]));
+        var context = SetupTestContext(token: TestData.ClientV2TokenString);
+        var validator = SetupValidator(current: TestData.ClientToken.Timestamp, store: store.Object);
+
+        var validationResult = await validator.ValidateAsync(context);
+
+        Assert.Equal(ValidationResultStatus.Invalid, validationResult.Status);
+        Assert.Equal($"Invalid token: {TestData.ClientV2TokenString}", validationResult.Reason);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_V2StoreThrows_ReturnsUnavailable()
+    {
+        var store = SetupV2Store(_ => throw new Exception("Test exception"));
+        var context = SetupTestContext(token: TestData.ClientV2TokenString);
+        var validator = SetupValidator(current: TestData.ClientToken.Timestamp, store: store.Object);
+
+        var validationResult = await validator.ValidateAsync(context);
+
+        Assert.Equal(ValidationResultStatus.Unavailable, validationResult.Status);
+        Assert.Equal("Secret lookup unavailable: Test exception", validationResult.Reason);
+    }
+
     private static async Task EnsureInvalidAsync(
         string expectedReason,
         string? type = null,
@@ -212,12 +314,14 @@ public class RequestValidatorTests
             x.GetSecretAsync(TestData.ClientSecretString) == Task.FromResult(TestData.ClientSecret)
         );
 
+        var resolvedStore = store ?? mockedStore;
+
         var validator = new RequestValidator(
             new TestSystemClock(current ?? TestData.ClientToken.Timestamp),
-            store ?? mockedStore,
+            resolvedStore,
             streamingOptions ?? new StreamingOptions(),
             rpService ?? Mock.Of<IRelayProxyService>(),
-            tokenValidator ?? new TokenValidator(),
+            tokenValidator ?? new TokenValidator(resolvedStore),
             logger ?? NullLogger<RequestValidator>.Instance
         );
 
